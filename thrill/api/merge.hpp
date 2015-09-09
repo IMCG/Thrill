@@ -220,7 +220,11 @@ public:
 
         //Init the looser-tree
          
-        LoserTreeType lt(k, [this] (const ValueType &a, const ValueType &b) -> bool{return comperator_(b, a);});
+        LoserTreeType lt(k, [this] 
+                (const ValueType &a, const ValueType &b) -> bool {
+                    return comperator_(a, b);
+                }
+        );
 
         //Abritary element (copied!)
         ValueType *zero = NULL;
@@ -230,11 +234,9 @@ public:
         //Find abritary elem. 
         for(size_t i = 0; i < k; i++) {
             if(readers[i].HasValue()) {
-                lt.insert_start(readers[i].Value(), i, false);
-                if(zero == NULL) {
-                     zero = (ValueType*)malloc(sizeof(ValueType));
-                     *zero = readers[i].Value();
-                }
+                 zero = (ValueType*)malloc(sizeof(ValueType));
+                 *zero = readers[i].Value();
+                 break;
             } 
         }
 
@@ -244,6 +246,8 @@ public:
                 if(!readers[i].HasValue()) {
                     lt.insert_start(*zero, i, true);
                     completed++;
+                } else {
+                    lt.insert_start(readers[i].Value(), i, false);
                 }
             }
             lt.init();
@@ -262,6 +266,7 @@ public:
                 out << reader.Value() << " ";
                
                 reader.Next();
+
                 if(reader.HasValue()) {
                     lt.delete_min_insert(reader.Value(), false);
                 } else {
