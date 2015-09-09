@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 #include <random>
+#include <sstream>
 
 namespace thrill {
 namespace api {
@@ -197,16 +198,18 @@ public:
 
     void PushData(bool consume) final {
         size_t result_count = 0;
-        static const bool debug = false;
+        static const bool debug = true;
 
         //TODO(ej) Whole class does not handle empty seqs well. 
 
         LOG << "Entering Main OP";
 
         typedef data::BufferedBlockReader<ValueType, data::ConcatBlockSource<data::DynBlockSource>> Reader; 
-        typedef stxxl::parallel::LoserTreePointer<true, ValueType, Comperator> LoserTreeType; //ADVICE(tb), select correct type. 
+        typedef stxxl::parallel::LoserTreePointer<true, ValueType, std::function<bool(const ValueType &a, const ValueType &b)>> LoserTreeType; //ADVICE(tb), select correct type. 
+        
 
         size_t k = channels_.size();
+        std::ostringstream out; 
 
         // get buffered inbound readers from all Channels
         std::vector<Reader> readers;
@@ -217,51 +220,68 @@ public:
 
         //Init the looser-tree
          
-        LoserTreeType lt(k, comperator_);
+        LoserTreeType lt(k, [this] (const ValueType &a, const ValueType &b) -> bool{return comperator_(b, a);});
 
         //Abritary element (copied!)
-        ValueType zero = readers[0].Value();
-
-        for(size_t i = 0; i < k; i++) {
-            if(readers[i].HasValue()) {
-                lt.insert_start(readers[i].Value(), i, false);
-            } else {
-                lt.insert_start(zero, i, true);
-            }
-        }
-
-        lt.init();
+        ValueType *zero = NULL;
 
         size_t completed = 0;
 
-        while(completed < k) {
+        //Find abritary elem. 
+        for(size_t i = 0; i < k; i++) {
+            if(readers[i].HasValue()) {
+                lt.insert_start(readers[i].Value(), i, false);
+                if(zero == NULL) {
+                     zero = (ValueType*)malloc(sizeof(ValueType));
+                     *zero = readers[i].Value();
+                }
+            } 
+        }
 
-            // REVIEW(tb): now it is so horrible, it does not merge, literally.  
-
-            size_t min = lt.get_min_source();
-
-            auto &reader = readers[min];
-
-            for (auto func : DIANode<ValueType>::callbacks_) {
-                func(reader.Value());
+        if(zero != NULL) { //If so, we only have empty channels. 
+            //Insert abritray element for each empty reader.
+            for(size_t i = 0; i < k; i++) {
+                if(!readers[i].HasValue()) {
+                    lt.insert_start(*zero, i, true);
+                    completed++;
+                }
             }
-           
-            reader.Next();
-            if(reader.HasValue()) {
-                lt.delete_min_insert(reader.Value(), false);
-            } else {
-                lt.delete_min_insert(zero, true); 
-                completed++;
-            }
+            lt.init();
 
-            result_count++;
+            while(completed < k) {
+
+                size_t min = lt.get_min_source();
+
+                auto &reader = readers[min];
+                assert(reader.HasValue());
+
+                for (auto func : DIANode<ValueType>::callbacks_) {
+                    func(reader.Value());
+                }
+
+                out << reader.Value() << " ";
+               
+                reader.Next();
+                if(reader.HasValue()) {
+                    lt.delete_min_insert(reader.Value(), false);
+                } else {
+                    lt.delete_min_insert(*zero, true); 
+                    completed++;
+                }
+
+                result_count++;
+            }
+            
+            free(zero);
         }
 
         for (size_t i = 0; i < k; i++) {
             channels_[i]->Close();
             this->WriteChannelStats(channels_[i]);
         }
-        
+
+        LOG << "Merged: " << out.str(); 
+
         sLOG << "Merge: result_count" << result_count;
     }
 
