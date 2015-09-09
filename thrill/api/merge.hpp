@@ -23,6 +23,7 @@
 #include <thrill/data/buffered_block_reader.hpp>
 #include <thrill/data/dyn_block_reader.hpp>
 #include <thrill/net/collective_communication.hpp>
+#include <thrill/core/stxxl_losertree.hpp>
 
 #include <algorithm>
 #include <functional>
@@ -198,50 +199,65 @@ public:
         size_t result_count = 0;
         static const bool debug = false;
 
+        //TODO(ej) Whole class does not handle empty seqs well. 
+
         LOG << "Entering Main OP";
 
         typedef data::BufferedBlockReader<ValueType, data::ConcatBlockSource<data::DynBlockSource>> Reader; 
+        typedef stxxl::parallel::LoserTreePointer<true, ValueType, Comperator> LoserTreeType; //ADVICE(tb), select correct type. 
+
+        size_t k = channels_.size();
 
         // get buffered inbound readers from all Channels
         std::vector<Reader> readers;
-        for(size_t i = 0; i < channels_.size(); i++) {
+
+        for(size_t i = 0; i < k; i++) {
             readers.emplace_back(std::move(channels_[i]->GetConcatSource(consume)));
         }
 
-        while(true) {
+        //Init the looser-tree
+         
+        LoserTreeType lt(k, comperator_);
 
-            int biggest = -1;
+        //Abritary element (copied!)
+        ValueType zero = readers[0].Value();
 
-            // REVIEW(ej): i didnt even see that this merges, so horrible.
-
-            for (size_t i = 0; i < readers.size(); i++) {
-                if(readers[i].HasValue()) {
-                    if(biggest == -1 || comperator_(readers[i].Value(), readers[biggest].Value())) {
-                       biggest = (int)i; 
-                    }
-                }
-            }
-
-            if(biggest == -1) {
-                LOG << "Finished Merge.";
-                //We finished.
-                break;
+        for(size_t i = 0; i < k; i++) {
+            if(readers[i].HasValue()) {
+                lt.insert_start(readers[i].Value(), i, false);
             } else {
-                LOG << "Use " << biggest; 
+                lt.insert_start(zero, i, true);
             }
+        }
 
-            auto &reader = readers[biggest];
+        lt.init();
+
+        size_t completed = 0;
+
+        while(completed < k) {
+
+            // REVIEW(tb): now it is so horrible, it does not merge, literally.  
+
+            size_t min = lt.get_min_source();
+
+            auto &reader = readers[min];
 
             for (auto func : DIANode<ValueType>::callbacks_) {
                 func(reader.Value());
             }
-
+           
             reader.Next();
+            if(reader.HasValue()) {
+                lt.delete_min_insert(reader.Value(), false);
+            } else {
+                lt.delete_min_insert(zero, true); 
+                completed++;
+            }
 
             result_count++;
         }
 
-        for (size_t i = 0; i < channels_.size(); i++) {
+        for (size_t i = 0; i < k; i++) {
             channels_[i]->Close();
             this->WriteChannelStats(channels_[i]);
         }
