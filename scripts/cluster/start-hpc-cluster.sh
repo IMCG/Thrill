@@ -6,4 +6,4 @@ slurm=${cluster}/../slurm
 
 . ${cluster}/thrill-env.sh
 
-msub -v slurm=${slurm},cluster=${cluster} -N thrill -l nodes=${CLUSTER_NODES}:ppn=${CLUSTER_PPN},walltime=${CLUSTER_WALLTIME},naccesspolicy=shared ${slurm}/invokeWrapper.sh
+msub -v slurm=${slurm},cluster=${cluster} -N thrill -l nodes=${CLUSTER_NODES}:ppn=${CLUSTER_PPN}:pmem=${CLUSTER_MEMPN},walltime=${CLUSTER_WALLTIME},naccesspolicy=shared ${slurm}/invokeWrapper.sh

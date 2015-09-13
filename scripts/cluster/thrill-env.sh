@@ -7,6 +7,7 @@
 # Cluster Options
 export CLUSTER_NODES="2"
 export CLUSTER_PPN="4"
+export CLUSTER_MEMPN="16gb"
 export CLUSTER_WALLTIME="1:00:00"
 export WORKER_TIMER="1h"
 export THRILL_TASK="worker.sh"
