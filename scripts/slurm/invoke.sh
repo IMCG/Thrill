@@ -28,5 +28,4 @@ set +e
 
 
 . ${cluster}/thrill-env.sh
-sleep $timer
-# . ${cluster}/${THRILL_TASK}
+. ${cluster}/${THRILL_TASK}
